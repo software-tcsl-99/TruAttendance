@@ -237,7 +237,8 @@ export default function App() {
 
         const isOutdated = currentBuildNum < requiredBuild || isVerOutdated(currentVer, info.minAndroidVersion);
 
-        if (info.forceUpdateEnabled && isOutdated) {
+        const shouldEnforceUpdate = !__DEV__ && Platform.OS !== "web";
+        if (shouldEnforceUpdate && info.forceUpdateEnabled && isOutdated) {
           setUpdateInfo(info);
           setUpdateRequired(true);
         } else {

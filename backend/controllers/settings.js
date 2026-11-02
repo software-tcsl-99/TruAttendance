@@ -90,6 +90,7 @@ exports.getOfficeSettings = async (req, res, next) => {
 exports.getPublicAppVersion = async (req, res) => {
   try {
     const office = await CompanySetting.findOne().sort({ createdAt: 1 });
+    const forceUpdateDisabled = process.env.DISABLE_FORCE_APP_UPDATE === 'true';
     return res.status(200).json({
       success: true,
       data: {
@@ -97,7 +98,7 @@ exports.getPublicAppVersion = async (req, res) => {
         minAndroidVersionCode: office?.minAndroidVersionCode || 1,
         androidApkUrl: office?.androidApkUrl || process.env.ANDROID_APK_URL || '',
         iosAppUrl: office?.iosAppUrl || process.env.IOS_APP_URL || '',
-        forceUpdateEnabled: office?.forceUpdateEnabled || false,
+        forceUpdateEnabled: !forceUpdateDisabled && Boolean(office?.forceUpdateEnabled),
         updateMessage: office?.updateMessage || 'A newer version of the application is available. Please update the app to continue.',
       },
     });

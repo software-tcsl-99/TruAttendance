@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "build": "npx expo export",
+    "build:apk": "npx eas-cli build --platform android --profile preview",
     "start": "expo start -c",
     "dev": "expo start -c",
     "go": "expo start -c --go",
@@ -13,6 +14,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@rbayuokt/expo-face-vision": "^0.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-community/netinfo": "12.0.1",

@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import {
   Camera,
@@ -32,6 +31,7 @@ import {
 } from 'react-native';
 import api from '../api/axios';
 // import { useSidebar } from '../context/SidebarContext'; // SIDEBAR COMMENTED OUT
+import AttendanceLivenessCapture from '../components/AttendanceLivenessCapture';
 import HRModuleFooter from '../components/HRModuleFooter';
 import socket from '../socket';
 import { formatWorkingHours } from '../utils/timeFormat';
@@ -79,19 +79,10 @@ const getSelfieUri = (s) => {
 
 const AttendanceScreen = ({ navigation }) => {
   // const { openSidebar } = useSidebar(); // SIDEBAR COMMENTED OUT
-  const requestCameraPermission = async () => {
-    try {
-      await ImagePicker.requestCameraPermissionsAsync();
-    } catch (e) {
-      console.warn('[AttendanceScreen] Failed to request camera permission on mount:', e.message);
-    }
-  };
-
   useEffect(() => {
     const fetchData = () => {
       verifyBackgroundPermission();
       getLocation();
-      requestCameraPermission();
       fetchUser();
       fetchOfficeSettings();
       fetchLeaves();
@@ -107,27 +98,8 @@ const AttendanceScreen = ({ navigation }) => {
       }
     });
 
-    // Android: Recover pending image if Android OS killed MainActivity during camera capture
-    const checkPendingCameraResult = async () => {
-      try {
-        if (typeof ImagePicker.getPendingResultAsync === 'function') {
-          const res = await ImagePicker.getPendingResultAsync();
-          if (res && !res.canceled && res.assets && res.assets.length > 0) {
-            const asset = res.assets[0];
-            if (asset && (asset.uri || asset.base64)) {
-              setSelfie(asset);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[AttendanceScreen] Error checking pending camera result:', e.message);
-      }
-    };
-    checkPendingCameraResult();
-
     const unsubscribe = navigation.addListener('focus', () => {
       fetchData();
-      checkPendingCameraResult();
     });
 
     return () => {
@@ -139,6 +111,7 @@ const AttendanceScreen = ({ navigation }) => {
   const [user, setUser] = useState(null);
 
   const [selfie, setSelfie] = useState(null);
+  const [showLivenessCapture, setShowLivenessCapture] = useState(false);
   const [location, setLocation] = useState(null);
   const [locationLoading, setLocationLoading] = useState(true);
   const [punchLoading, setPunchLoading] = useState(false);
@@ -488,46 +461,7 @@ const AttendanceScreen = ({ navigation }) => {
   }, [todayAttendance]);
 
   const takeSelfie = async () => {
-    try {
-      // Check existing permission first
-      const { status: currentStatus } = await ImagePicker.getCameraPermissionsAsync();
-      let status = currentStatus;
-      if (status !== 'granted') {
-        const { status: newStatus } = await ImagePicker.requestCameraPermissionsAsync();
-        status = newStatus;
-      }
-      if (status !== 'granted') {
-        setToast({ show: true, message: 'Camera access is required for verification.', type: 'error' });
-        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
-        return;
-      }
-
-      const cameraTypeFront = ImagePicker.CameraType?.front || 'front';
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 0.35, // 0.35 gives crisp facial clarity while keeping payload under ~120KB for instant transfer
-        base64: true,
-        cameraType: cameraTypeFront,
-        preferFrontCamera: true,
-      });
-
-      if (!result) return;
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        if (asset && (asset.uri || asset.base64)) {
-          setSelfie(asset);
-        } else {
-          setToast({ show: true, message: 'Could not capture image. Please try again.', type: 'error' });
-          setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
-        }
-      }
-    } catch (err) {
-      console.warn('[AttendanceScreen] takeSelfie error:', err);
-      setToast({ show: true, message: `Camera error: ${err.message || 'Could not capture selfie'}`, type: 'error' });
-      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
-    }
+    setShowLivenessCapture(true);
   };
 
   // Helper: get current location quickly (for use when punching without pre-loaded location)
@@ -952,11 +886,15 @@ const AttendanceScreen = ({ navigation }) => {
                   <Eye size={16} color="white" />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setSelfie(null)}
-                  className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-rose-500 justify-center items-center shadow-sm"
+                  onPress={() => {
+                    setSelfie(null);
+                    setShowLivenessCapture(true);
+                  }}
+                  accessibilityLabel="Retake attendance selfie with liveness check"
+                  className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-indigo-600 justify-center items-center shadow-sm"
                   activeOpacity={0.7}
                 >
-                  <X size={16} color="white" />
+                  <RotateCcw size={16} color="white" />
                 </TouchableOpacity>
               </View>
               <Text className="text-[10px] font-bold text-slate-400 mt-1.5">Selfie captured</Text>
@@ -1241,6 +1179,15 @@ const AttendanceScreen = ({ navigation }) => {
 
 
       </ScrollView>
+
+      <AttendanceLivenessCapture
+        visible={showLivenessCapture}
+        onCancel={() => setShowLivenessCapture(false)}
+        onCapture={(photo) => {
+          setSelfie(photo);
+          setShowLivenessCapture(false);
+        }}
+      />
 
       {/* Full Screen Image Preview Modal */}
       <Modal visible={!!previewImage} transparent={true} animationType="fade">

@@ -8,7 +8,7 @@
   "packageManager": "npm@10.8.2",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "node server.js",
     "seed": "node scripts/seedData.js",
     "seedmore": "node scripts/seed_comprehensive.js",
     "admin": "node scripts/createAdmin.js",

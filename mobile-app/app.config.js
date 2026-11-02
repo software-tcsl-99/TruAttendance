@@ -28,6 +28,12 @@ module.exports = ({ config }) => {
     plugins: [
       ...(config.plugins || []),
       "expo-sqlite",
+      [
+        "@rbayuokt/expo-face-vision",
+        {
+          cameraPermission: "Camera access is required to verify attendance liveness.",
+        },
+      ],
       ["expo-location", {
         locationAlwaysAndWhenInUsePermission: "Allow Geo-Track HRMS to access your location for attendance tracking.",
         isAndroidBackgroundLocationEnabled: true,
