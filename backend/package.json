@@ -14,7 +14,7 @@
     "admin": "node scripts/createAdmin.js",
     "reset": "node scripts/resetDB.js",
     "migrate": "node scripts/migrate_to_atlas.js",
-    "test": "node --test modules/hr/expense/tests/*.test.js"
+    "test": "node --test modules/hr/expense/tests/*.test.js tests/*.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

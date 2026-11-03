@@ -24,6 +24,15 @@ const AttendanceSchema = new mongoose.Schema({
       address: String,
     },
     selfie: String,
+    liveness: {
+      status: { type: String, enum: ['verified', 'missing', 'invalid', 'skipped_mode'] },
+      reason: String,
+      steps: [String],
+      platform: String,
+      appVersion: String,
+      verifiedAt: Date,
+      challengeId: { type: mongoose.Schema.Types.ObjectId, ref: 'LivenessChallenge' },
+    },
     isOutside: { type: Boolean, default: false }
   },
   punchOut: {
@@ -34,6 +43,15 @@ const AttendanceSchema = new mongoose.Schema({
       address: String,
     },
     selfie: String,
+    liveness: {
+      status: { type: String, enum: ['verified', 'missing', 'invalid', 'skipped_mode'] },
+      reason: String,
+      steps: [String],
+      platform: String,
+      appVersion: String,
+      verifiedAt: Date,
+      challengeId: { type: mongoose.Schema.Types.ObjectId, ref: 'LivenessChallenge' },
+    },
     isOutside: { type: Boolean, default: false },
     isAutoPunchOut: { type: Boolean, default: false }
   },

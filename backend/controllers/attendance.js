@@ -18,6 +18,36 @@ const { RawTrackingPoint, LiveEmployeeStatus } = require('../models/Tracking');
 const { reverseGeocodeAsync } = require('../services/enterpriseTrackingService');
 const MobileAppConfig = require('../models/MobileAppConfig');
 const { isUserActive, isUserAttendanceBlocked, isUserTrackingBlocked, isCompanyAdminUser, COMPANY_ADMIN_ROLES, COMPANY_ADMIN_ROLE_CODES } = require('../utils/accessControlHelper');
+const {
+  createLivenessChallenge,
+  evaluatePunchLiveness,
+} = require('../services/attendanceLivenessService');
+
+exports.createLivenessChallenge = async (req, res) => {
+  try {
+    const { purpose } = req.body || {};
+    if (!['punchIn', 'punchOut'].includes(purpose)) {
+      return res.status(400).json({
+        success: false,
+        code: 'LIVENESS_INVALID',
+        message: 'A valid attendance purpose is required.',
+      });
+    }
+
+    const challenge = await createLivenessChallenge({
+      userId: req.user._id || req.user.id,
+      purpose,
+    });
+    return res.status(201).json(challenge);
+  } catch (err) {
+    console.error('[Liveness] Could not create attendance challenge:', err.message);
+    return res.status(500).json({
+      success: false,
+      code: 'LIVENESS_INVALID',
+      message: 'Could not start live attendance verification.',
+    });
+  }
+};
 
 // @desc    Track location batch
 // @route   POST /api/attendance/track-batch
@@ -47,16 +77,8 @@ exports.trackBatch = async (req, res, next) => {
 // @access  Private
 exports.punchIn = async (req, res, next) => {
   try {
-    const { latitude, longitude, address, selfie } = req.body;
+    const { latitude, longitude, address, selfie, liveness } = req.body;
     const userId = req.user.id;
-
-    // Auto-close any unclosed prior day attendance sessions before starting today's session
-    try {
-      const autoPunchOutService = require('../services/autoPunchOutService');
-      await autoPunchOutService.closePriorDayAttendances(userId, req.tenant?.companyId);
-    } catch (e) {
-      console.error('Auto-closure check in punchIn failed:', e.message);
-    }
 
     const now = new Date();
 
@@ -109,15 +131,39 @@ exports.punchIn = async (req, res, next) => {
     });
 
     if (existingAttendance) {
-      // If it's an 'Absent' placeholder, we allow overwriting it with a real punch-in
-      if (existingAttendance.status === 'Absent') {
-        await Attendance.deleteOne({ _id: existingAttendance._id });
-        existingAttendance = null;
-      } else if (!existingAttendance.punchOut?.time) {
+      if (existingAttendance.status !== 'Absent' && !existingAttendance.punchOut?.time) {
         return res.status(400).json({ success: false, message: 'You already have an active session. Please punch out first.' });
-      } else {
+      }
+      if (existingAttendance.status !== 'Absent' && existingAttendance.punchOut?.time) {
         return res.status(400).json({ success: false, message: 'You have already completed your attendance for today.' });
       }
+    }
+
+    const livenessEvaluation = await evaluatePunchLiveness({
+      userId,
+      purpose: 'punchIn',
+      liveness,
+      selfie,
+    });
+    if (!livenessEvaluation.accepted) {
+      return res.status(403).json({
+        success: false,
+        code: livenessEvaluation.code,
+        message: livenessEvaluation.message,
+      });
+    }
+
+    // Auto-close prior-day sessions only after liveness accepts this punch attempt.
+    try {
+      const autoPunchOutService = require('../services/autoPunchOutService');
+      await autoPunchOutService.closePriorDayAttendances(userId, req.tenant?.companyId);
+    } catch (e) {
+      console.error('Auto-closure check in punchIn failed:', e.message);
+    }
+
+    if (existingAttendance?.status === 'Absent') {
+      await Attendance.deleteOne({ _id: existingAttendance._id });
+      existingAttendance = null;
     }
 
     // Multi-location geofence evaluation:
@@ -197,6 +243,7 @@ exports.punchIn = async (req, res, next) => {
         time: now,
         location: { latitude, longitude, address },
         selfie: (selfie && typeof selfie === 'string' && selfie.startsWith('http')) ? selfie : null,
+        ...(livenessEvaluation.record ? { liveness: livenessEvaluation.record } : {}),
         isOutside: isOutside
       },
       status,
@@ -323,7 +370,7 @@ exports.punchIn = async (req, res, next) => {
 
 exports.punchOut = async (req, res, next) => {
   try {
-    const { latitude, longitude, address, selfie } = req.body;
+    const { latitude, longitude, address, selfie, liveness } = req.body;
     const userId = req.user.id;
 
     // Parallelize DB lookups (Selfie upload moved to background)
@@ -396,6 +443,20 @@ exports.punchOut = async (req, res, next) => {
     attendance.isHalfDay = finalStatus === 'Half Day';
     attendance.isLate = finalStatus === 'Late';
 
+    const livenessEvaluation = await evaluatePunchLiveness({
+      userId,
+      purpose: 'punchOut',
+      liveness,
+      selfie,
+    });
+    if (!livenessEvaluation.accepted) {
+      return res.status(403).json({
+        success: false,
+        code: livenessEvaluation.code,
+        message: livenessEvaluation.message,
+      });
+    }
+
     // Sort and deduplicate raw tracking points on punch out for accurate distance
     const rawPoints = await RawTrackingPoint.find({
       companyId: req.tenant.companyId,
@@ -420,6 +481,10 @@ exports.punchOut = async (req, res, next) => {
       attendance.isOutstation = false;
       attendance.outstationDistanceKm = 0;
       attendance.outstationReturnedAt = new Date();
+    }
+
+    if (livenessEvaluation.record) {
+      attendance.punchOut.liveness = livenessEvaluation.record;
     }
 
     await attendance.save();
@@ -1443,6 +1508,3 @@ exports.uploadPunchSelfie = async (req, res, next) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
-

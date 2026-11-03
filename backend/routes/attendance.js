@@ -1,7 +1,9 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const {
   punchIn,
   punchOut,
+  createLivenessChallenge,
   getHistory,
   getAllAttendance,
   trackLocation,
@@ -19,6 +21,20 @@ const { protect, authorize } = require('../middleware/auth');
 
 router.use(protect);
 
+const livenessChallengeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  keyGenerator: (req) => String(req.user?._id || req.user?.id || 'authenticated-user'),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: 'LIVENESS_RATE_LIMITED',
+    message: 'Too many verification attempts. Please wait and try again.',
+  },
+});
+
+router.post('/liveness/challenge', livenessChallengeLimiter, createLivenessChallenge);
 router.post('/punch-in', punchIn);
 router.post('/punch-out', punchOut);
 router.post('/upload-selfie', uploadPunchSelfie);
@@ -34,4 +50,3 @@ router.get('/', authorize('admin'), getAllAttendance);
 router.put('/admin-edit/:attendanceId', authorize('admin'), adminEditAttendance);
 
 module.exports = router;
-

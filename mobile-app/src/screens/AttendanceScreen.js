@@ -111,6 +111,9 @@ const AttendanceScreen = ({ navigation }) => {
   const [user, setUser] = useState(null);
 
   const [selfie, setSelfie] = useState(null);
+  const [selfieCapturedAt, setSelfieCapturedAt] = useState(null);
+  const [livenessInfo, setLivenessInfo] = useState(null);
+  const [livenessPassed, setLivenessPassed] = useState(false);
   const [showLivenessCapture, setShowLivenessCapture] = useState(false);
   const [location, setLocation] = useState(null);
   const [locationLoading, setLocationLoading] = useState(true);
@@ -461,7 +464,43 @@ const AttendanceScreen = ({ navigation }) => {
   }, [todayAttendance]);
 
   const takeSelfie = async () => {
+    setSelfie(null);
+    setSelfieCapturedAt(null);
+    setLivenessInfo(null);
+    setLivenessPassed(false);
     setShowLivenessCapture(true);
+  };
+
+  const clearExpiredSelfie = () => {
+    if (!selfie) return false;
+    if (selfieCapturedAt && Date.now() - selfieCapturedAt <= 4 * 60 * 1000) {
+      return false;
+    }
+
+    setSelfie(null);
+    setSelfieCapturedAt(null);
+    setLivenessInfo(null);
+    setLivenessPassed(false);
+    setShowLivenessCapture(true);
+    setToast({ show: true, message: 'Selfie expired, please verify again', type: 'error' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    return true;
+  };
+
+  const promptRetakeSelfie = (message) => {
+    Alert.alert('Attendance verification required', message, [
+      {
+        text: 'Retake selfie',
+        onPress: () => {
+          setSelfie(null);
+          setSelfieCapturedAt(null);
+          setLivenessInfo(null);
+          setLivenessPassed(false);
+          setShowLivenessCapture(true);
+        }
+      },
+      { text: 'Cancel', style: 'cancel' }
+    ]);
   };
 
   // Helper: get current location quickly (for use when punching without pre-loaded location)
@@ -512,7 +551,7 @@ const AttendanceScreen = ({ navigation }) => {
         console.warn('[AttendanceScreen] FileSystem readAsStringAsync error:', e.message);
       }
     }
-    return 'skipped';
+    return null;
   };
 
   // Helper: Extract selfie URI for local preview
@@ -522,6 +561,8 @@ const AttendanceScreen = ({ navigation }) => {
   };
 
   const handlePunchIn = async (bypassBgCheck = false) => {
+    if (clearExpiredSelfie()) return;
+
     // 0. Check background location permission on Android (Warn & guide, allow bypass)
     if (Platform.OS === 'android' && !bypassBgCheck) {
       try {
@@ -574,6 +615,16 @@ const AttendanceScreen = ({ navigation }) => {
       setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
       return;
     }
+    if (!livenessPassed) {
+      promptRetakeSelfie('Please retake your selfie and complete the live verification before punching in.');
+      return;
+    }
+
+    const capturedSelfiePayload = await getSelfiePayload(selfie);
+    if (!capturedSelfiePayload) {
+      promptRetakeSelfie('The captured selfie could not be read. Please retake it before punching in.');
+      return;
+    }
 
     // Background location permission verified at top of handlePunchIn
 
@@ -581,7 +632,6 @@ const AttendanceScreen = ({ navigation }) => {
     setPunchLoadingMessage('Verifying & Punching in...');
     setToast({ show: true, message: 'Verifying & Punching in...', type: 'info' });
 
-    const capturedSelfiePayload = await getSelfiePayload(selfie);
     const capturedSelfieUri = getSelfieUriForPreview(selfie);
 
     try {
@@ -591,6 +641,7 @@ const AttendanceScreen = ({ navigation }) => {
         longitude: punchLocation.longitude,
         address: punchLocation.address,
         selfie: capturedSelfiePayload,
+        ...(livenessInfo ? { liveness: livenessInfo } : {}),
       });
 
       const updated = res.data?.data;
@@ -601,13 +652,21 @@ const AttendanceScreen = ({ navigation }) => {
         setTodayAttendance(updated);
       }
       setSelfie(null); // Clear selfie after punch
+      setSelfieCapturedAt(null);
+      setLivenessInfo(null);
+      setLivenessPassed(false);
       setToast({ show: true, message: 'Punched In successfully!', type: 'success' });
       setTimeout(() => {
         setToast(prev => ({ ...prev, show: false }));
       }, 2000);
     } catch (err) {
-      setToast({ show: true, message: err.response?.data?.message || 'Could not punch in. Please try again.', type: 'error' });
-      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
+      const code = err.response?.data?.code;
+      if (['LIVENESS_REQUIRED', 'LIVENESS_INVALID', 'LIVENESS_EXPIRED', 'LIVENESS_REPLAYED'].includes(code)) {
+        promptRetakeSelfie(err.response?.data?.message || 'Live verification failed. Please retake your selfie.');
+      } else {
+        setToast({ show: true, message: err.response?.data?.message || 'Could not punch in. Please try again.', type: 'error' });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
+      }
     } finally {
       setPunchLoading(false);
       setPunchLoadingMessage('');
@@ -615,15 +674,29 @@ const AttendanceScreen = ({ navigation }) => {
   };
 
   const handlePunchOut = async () => {
+    if (clearExpiredSelfie()) return;
+
     Alert.alert('Confirm Punch Out', 'Are you sure you want to end your shift?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Punch Out',
         style: 'destructive',
         onPress: async () => {
+          if (clearExpiredSelfie()) return;
+
           if (!selfie) {
             setToast({ show: true, message: 'Selfie is required for verification.', type: 'error' });
             setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
+            return;
+          }
+          if (!livenessPassed) {
+            promptRetakeSelfie('Please retake your selfie and complete the live verification before punching out.');
+            return;
+          }
+
+          const capturedSelfiePayload = await getSelfiePayload(selfie);
+          if (!capturedSelfiePayload) {
+            promptRetakeSelfie('The captured selfie could not be read. Please retake it before punching out.');
             return;
           }
 
@@ -651,7 +724,6 @@ const AttendanceScreen = ({ navigation }) => {
           setPunchLoadingMessage('Verifying & Punching out...');
           setToast({ show: true, message: 'Verifying & Punching out...', type: 'info' });
 
-          const capturedSelfiePayload = await getSelfiePayload(selfie);
           const capturedSelfieUri = getSelfieUriForPreview(selfie);
 
           try {
@@ -661,6 +733,7 @@ const AttendanceScreen = ({ navigation }) => {
               longitude: punchLocation.longitude,
               address: punchLocation.address,
               selfie: capturedSelfiePayload,
+              ...(livenessInfo ? { liveness: livenessInfo } : {}),
             });
 
             const updated = res.data?.data;
@@ -671,6 +744,9 @@ const AttendanceScreen = ({ navigation }) => {
               setTodayAttendance(updated);
             }
             setSelfie(null); // Clear selfie after punch
+            setSelfieCapturedAt(null);
+            setLivenessInfo(null);
+            setLivenessPassed(false);
             // Clear persistent tracking session upon punch out
             try {
               const { clearTrackingSession } = require('../services/trackingManager');
@@ -684,8 +760,13 @@ const AttendanceScreen = ({ navigation }) => {
               setToast(prev => ({ ...prev, show: false }));
             }, 2000);
           } catch (err) {
-            setToast({ show: true, message: err.response?.data?.message || 'Could not punch out. Please try again.', type: 'error' });
-            setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
+            const code = err.response?.data?.code;
+            if (['LIVENESS_REQUIRED', 'LIVENESS_INVALID', 'LIVENESS_EXPIRED', 'LIVENESS_REPLAYED'].includes(code)) {
+              promptRetakeSelfie(err.response?.data?.message || 'Live verification failed. Please retake your selfie.');
+            } else {
+              setToast({ show: true, message: err.response?.data?.message || 'Could not punch out. Please try again.', type: 'error' });
+              setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
+            }
           } finally {
             setPunchLoading(false);
             setPunchLoadingMessage('');
@@ -888,6 +969,9 @@ const AttendanceScreen = ({ navigation }) => {
                 <TouchableOpacity
                   onPress={() => {
                     setSelfie(null);
+                    setSelfieCapturedAt(null);
+                    setLivenessInfo(null);
+                    setLivenessPassed(false);
                     setShowLivenessCapture(true);
                   }}
                   accessibilityLabel="Retake attendance selfie with liveness check"
@@ -1182,9 +1266,13 @@ const AttendanceScreen = ({ navigation }) => {
 
       <AttendanceLivenessCapture
         visible={showLivenessCapture}
+        purpose={alreadyPunchedIn ? 'punchOut' : 'punchIn'}
         onCancel={() => setShowLivenessCapture(false)}
-        onCapture={(photo) => {
+        onCapture={(photo, info) => {
           setSelfie(photo);
+          setSelfieCapturedAt(Date.now());
+          setLivenessInfo(info || null);
+          setLivenessPassed(true);
           setShowLivenessCapture(false);
         }}
       />

@@ -9,7 +9,7 @@ module.exports = ({ config }) => {
   return {
     ...config,
     updates: {
-      url: "https://u.expo.dev/787038e4-7225-4787-a053-519c618c6ef2",
+      url: "https://u.expo.dev/8abf158f-1740-4430-96a6-4885a68820ad",
       enabled: true,
       checkAutomatically: "ON_LOAD",
       fallbackToCacheTimeout: 10000,
@@ -21,7 +21,7 @@ module.exports = ({ config }) => {
     extra: {
       ...(config.extra || {}),
       eas: {
-        projectId: "787038e4-7225-4787-a053-519c618c6ef2",
+        projectId: "8abf158f-1740-4430-96a6-4885a68820ad",
         ...(config.extra?.eas || {}),
       },
     },
